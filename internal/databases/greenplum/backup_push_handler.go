@@ -3,12 +3,11 @@ package greenplum
 import (
 	"encoding/json"
 	"fmt"
+	"path"
 	"regexp"
 	"strconv"
 	"strings"
 	"time"
-
-	"github.com/google/uuid"
 
 	"github.com/blang/semver"
 	"github.com/greenplum-db/gp-common-go-libs/cluster"
@@ -25,24 +24,29 @@ type BackupArguments struct {
 	isPermanent    bool
 	userData       string
 	segmentFwdArgs []SegmentFwdArg
+	segmentCfgPath string
 }
 
 type SegmentUserData struct {
-	ID string `json:"id"`
+	ContentID int `json:"content_id"`
 }
 
-func NewSegmentUserData() SegmentUserData {
-	return SegmentUserData{ID: uuid.New().String()}
+func NewSegmentUserData(contentID int) SegmentUserData {
+	return SegmentUserData{ContentID: contentID}
+}
+
+func (d SegmentUserData) String() string {
+	b, err := json.Marshal(d)
+	if err != nil {
+		panic(err)
+	}
+	return string(b)
 }
 
 // QuotedString will do json.Marshal-ing followed by quoting in order to escape special control characters
 // in the resulting JSON so it can be transferred as the cmdline argument to a segment
 func (d SegmentUserData) QuotedString() string {
-	b, err := json.Marshal(d)
-	if err != nil {
-		panic(err)
-	}
-	return strconv.Quote(string(b))
+	return strconv.Quote(d.String())
 }
 
 // SegmentFwdArg describes the specific WAL-G
@@ -60,8 +64,8 @@ type BackupWorkers struct {
 
 // CurBackupInfo holds all information that is harvest during the backup process
 type CurBackupInfo struct {
-	backupName          string
-	backupIDByContentID map[int]string
+	backupName    string
+	pgBackupNames []string
 }
 
 // BackupHandler is the main struct which is handling the backup process
@@ -74,16 +78,13 @@ type BackupHandler struct {
 
 func (bh *BackupHandler) buildCommand(contentID int) string {
 	segment := bh.globalCluster.ByContent[contentID][0]
-	segUserData := NewSegmentUserData()
-	bh.curBackupInfo.backupIDByContentID[contentID] = segUserData.ID
 	cmd := []string{
 		"WALG_LOG_LEVEL=DEVEL",
 		fmt.Sprintf("PGPORT=%d", segment.Port),
 		"wal-g",
 		fmt.Sprintf("backup-push %s", segment.DataDir),
-		fmt.Sprintf("--walg-storage-prefix=%d", segment.ContentID),
-		fmt.Sprintf("--add-user-data=%s", segUserData.QuotedString()),
-		fmt.Sprintf("--config=%s", internal.CfgFile),
+		fmt.Sprintf("--add-user-data=%s", NewSegmentUserData(contentID).QuotedString()),
+		fmt.Sprintf("--config=%s", bh.formatConfigPath(contentID)),
 	}
 
 	for _, arg := range bh.arguments.segmentFwdArgs {
@@ -97,11 +98,7 @@ func (bh *BackupHandler) buildCommand(contentID int) string {
 
 // HandleBackupPush handles the backup being read from filesystem and being pushed to the repository
 func (bh *BackupHandler) HandleBackupPush() {
-<<<<<<< HEAD
 	bh.curBackupInfo.backupName = "backup" + time.Now().Format(utility.BackupTimeFormat)
-=======
-	bh.curBackupInfo.backupName = "backup_" + time.Now().Format(utility.BackupTimeFormat)
->>>>>>> 64e92853f3e4cf9d9108775a69d1c23d9f0283e3
 
 	tracelog.InfoLogger.Println("Running wal-g on segments")
 	gplog.InitializeLogging("wal-g", "")
@@ -125,6 +122,8 @@ func (bh *BackupHandler) HandleBackupPush() {
 	err = bh.createRestorePoint(bh.curBackupInfo.backupName)
 	tracelog.ErrorLogger.FatalOnError(err)
 
+	err = bh.extractPgBackupNames()
+	tracelog.ErrorLogger.FatalOnError(err)
 	sentinelDto := NewBackupSentinelDto(bh.curBackupInfo)
 	tracelog.InfoLogger.Println("Uploading sentinel file")
 	tracelog.DebugLogger.Println(sentinelDto.String())
@@ -133,7 +132,6 @@ func (bh *BackupHandler) HandleBackupPush() {
 		tracelog.ErrorLogger.Printf("Failed to upload sentinel file for backup: %s", bh.curBackupInfo.backupName)
 		tracelog.ErrorLogger.FatalError(err)
 	}
-<<<<<<< HEAD
 }
 
 func (bh *BackupHandler) backupCoordinator() {
@@ -166,9 +164,6 @@ func (bh *BackupHandler) extractPgBackupNames() (err error) {
 	}
 	bh.curBackupInfo.pgBackupNames = backupNames
 	return
-=======
-	tracelog.InfoLogger.Printf("Backup %s successfully created", bh.curBackupInfo.backupName)
->>>>>>> 64e92853f3e4cf9d9108775a69d1c23d9f0283e3
 }
 
 func (bh *BackupHandler) connect() (err error) {
@@ -188,6 +183,11 @@ func (bh *BackupHandler) createRestorePoint(restorePointName string) (err error)
 	}
 	_, err = queryRunner.CreateGreenplumRestorePoint(restorePointName)
 	return
+}
+
+func (bh *BackupHandler) formatConfigPath(contentID int) string {
+	configName := fmt.Sprintf("wal-g-seg%s.yaml", strconv.Itoa(contentID))
+	return path.Join(bh.arguments.segmentCfgPath, configName)
 }
 
 func getGpCluster() (globalCluster *cluster.Cluster, err error) {
@@ -243,18 +243,16 @@ func NewBackupHandler(arguments BackupArguments) (bh *BackupHandler, err error) 
 			Uploader: uploader,
 		},
 		globalCluster: globalCluster,
-		curBackupInfo: CurBackupInfo{
-			backupIDByContentID: make(map[int]string),
-		},
 	}
 	return bh, err
 }
 
 // NewBackupArguments creates a BackupArgument object to hold the arguments from the cmd
-func NewBackupArguments(isPermanent bool, userData string, fwdArgs []SegmentFwdArg) BackupArguments {
+func NewBackupArguments(isPermanent bool, userData string, fwdArgs []SegmentFwdArg, segmentCfgPath string) BackupArguments {
 	return BackupArguments{
 		isPermanent:    isPermanent,
 		userData:       userData,
+		segmentCfgPath: segmentCfgPath,
 		segmentFwdArgs: fwdArgs,
 	}
 }

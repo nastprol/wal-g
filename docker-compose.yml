@@ -71,7 +71,6 @@ services:
       &&  mkdir -p /export/mysqlconfonly
       &&  mkdir -p /export/mysqldeletebinlogs
       &&  mkdir -p /export/archivereadyrename
-      &&  mkdir -p /export/gpfullbucket
       &&  /usr/bin/minio server /export'
 
   s3-another:
@@ -620,6 +619,3 @@ services:
       - docker/common/common_walg.env
     depends_on:
       - gp
-      - s3
-    links:
-      - s3

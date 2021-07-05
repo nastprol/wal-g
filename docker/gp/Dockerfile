@@ -1,13 +1,7 @@
 FROM wal-g/ubuntu:latest
 
 RUN apt-get update && \
-    apt-get install --yes --no-install-recommends --no-install-suggests locales iputils-ping ssh python-dev iproute2 less sudo \
-    gnupg \
-    gpg-agent \
-    pinentry-qt \
-    time \
-    bc \
-    jq
+    apt-get install --yes --no-install-recommends --no-install-suggests locales iputils-ping ssh python-dev iproute2 less sudo
 
 WORKDIR /usr/local
 RUN git clone https://github.com/greenplum-db/gpdb.git gpdb_src

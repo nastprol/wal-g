@@ -126,20 +126,7 @@ func configureLimiters() {
 
 // TODO : unit tests
 func ConfigureFolder() (storage.Folder, error) {
-	folder, err := ConfigureFolderForSpecificConfig(viper.GetViper())
-	if err != nil {
-		return nil, err
-	}
-
-	return ConfigureStoragePrefix(folder), nil
-}
-
-func ConfigureStoragePrefix(folder storage.Folder) storage.Folder {
-	prefix := viper.GetString(StoragePrefixSetting)
-	if prefix != "" {
-		folder = folder.GetSubFolder(prefix)
-	}
-	return folder
+	return ConfigureFolderForSpecificConfig(viper.GetViper())
 }
 
 // TODO: something with that
